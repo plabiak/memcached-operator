@@ -19,14 +19,17 @@ package controller
 import (
 	"context"
 	"fmt"
-	"reflect"
 
 	cachev1alpha1 "github.com/plabiak/memcached-operator/api/v1alpha1"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -83,34 +86,52 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	//Pod list reconciliation
 	podlist := &corev1.PodList{}
 	listOpts := []client.ListOption{
 		client.InNamespace(memcached.Namespace),
 		client.MatchingLabels(r.labelsForMemcached(memcached.Name)),
 	}
 	if err := r.List(ctx, podlist, listOpts...); err != nil {
-		log.Error(err, fmt.Sprintf("Failed to list pods for Memcached %s", memcached.Name))
+		log.Error(err, "Failed to list pods", "Memcached.Namespace", memcached.Namespace, "Memcached.Name", memcached.Name)
 		return ctrl.Result{}, err
 	}
-	podNames := getPodNames(podlist.Items)
-	if !reflect.DeepEqual(podNames, memcached.Status.Nodes) {
-		memcached.Status.Nodes = podNames
-		if err := r.Status().Update(ctx, memcached); err != nil {
-			log.Error(err, fmt.Sprintf("Failed to update Memcached status for %s", memcached.Name))
-			return ctrl.Result{}, err
-		}
-	}
+	memcached.Status.Nodes = getPodNames(podlist.Items)
+	existingSts := &appsv1.StatefulSet{}
+	err = r.Get(ctx, types.NamespacedName{Name: memcached.Name, Namespace: memcached.Namespace}, existingSts)
 
-	// Update the Memcached status with the pod names
-	if !reflect.DeepEqual(podNames, memcached.Status.Nodes) {
-		memcached.Status.Nodes = podNames
-		if err := r.Status().Update(ctx, memcached); err != nil {
-			log.Error(err, fmt.Sprintf("Failed to update Memcached status for %s", memcached.Name))
-			return ctrl.Result{}, err
+	if err == nil {
+		if existingSts.Status.ReadyReplicas == memcached.Spec.Size {
+			meta.SetStatusCondition(&memcached.Status.Conditions, metav1.Condition{
+				Type:    "Available",
+				Status:  metav1.ConditionTrue,
+				Reason:  "Reconciled",
+				Message: fmt.Sprintf("Memcached cluster is fully available with %d nodes", existingSts.Status.ReadyReplicas),
+			})
+		} else {
+			meta.SetStatusCondition(&memcached.Status.Conditions, metav1.Condition{
+				Type:    "Available",
+				Status:  metav1.ConditionFalse,
+				Reason:  "Progressing",
+				Message: fmt.Sprintf("Waiting for nodes to be ready. Expected: %d, Ready: %d", memcached.Spec.Size, existingSts.Status.ReadyReplicas),
+			})
 		}
+	} else if apierrors.IsNotFound(err) {
+		meta.SetStatusCondition(&memcached.Status.Conditions, metav1.Condition{
+			Type:    "Available",
+			Status:  metav1.ConditionFalse,
+			Reason:  "Creating",
+			Message: "Creating StatefulSet...",
+		})
+	} else {
+		log.Error(err, "Failed to get StatefulSet for status check")
+		return ctrl.Result{}, err
 	}
-	log.Info(fmt.Sprintf("Reconciling Memcached resource %s", req.NamespacedName))
+	if err := r.Status().Update(ctx, memcached); err != nil {
+		log.Error(err, "Failed to update Memcached status")
+		return ctrl.Result{}, err
+	}
+	log.Info(fmt.Sprintf("Successfully Reconciled Memcached resource %s", req.NamespacedName))
+
 	return ctrl.Result{}, nil
 }
 
@@ -152,6 +173,14 @@ func (r *MemcachedReconciler) statefulSetForMemcached(m *cachev1alpha1.Memcached
 		image = m.Spec.Image
 	}
 
+	cacheSize := m.Spec.CacheSize
+	if cacheSize == 0 {
+		cacheSize = 64
+	}
+
+	memoryLimit := resource.MustParse(fmt.Sprintf("%dMi", cacheSize+cacheSize/5))
+	memoryRequest := resource.MustParse(fmt.Sprintf("%dMi", cacheSize))
+
 	sts := &appsv1.StatefulSet{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "apps/v1",
@@ -176,12 +205,46 @@ func (r *MemcachedReconciler) statefulSetForMemcached(m *cachev1alpha1.Memcached
 				},
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{{
-						Name:  "memcached",
-						Image: image,
+						Name:    "memcached",
+						Image:   image,
+						Command: []string{"memcached"},
+						Args:    []string{"-m", fmt.Sprintf("%d", cacheSize), "-p", fmt.Sprintf("%d", m.Spec.ContainerPort)},
+
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								corev1.ResourceMemory: memoryLimit,
+							},
+							Requests: corev1.ResourceList{
+								corev1.ResourceMemory: memoryRequest,
+							},
+						},
+
 						Ports: []corev1.ContainerPort{{
 							ContainerPort: m.Spec.ContainerPort,
 							Name:          "memcached",
 						}},
+						LivenessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								TCPSocket: &corev1.TCPSocketAction{
+									Port: intstr.FromInt(int(m.Spec.ContainerPort)),
+								},
+							},
+							InitialDelaySeconds: 10,
+							TimeoutSeconds:      5,
+							PeriodSeconds:       10,
+							FailureThreshold:    3,
+						},
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								TCPSocket: &corev1.TCPSocketAction{
+									Port: intstr.FromInt(int(m.Spec.ContainerPort)),
+								},
+							},
+							InitialDelaySeconds: 5,
+							TimeoutSeconds:      3,
+							PeriodSeconds:       10,
+							FailureThreshold:    3,
+						},
 					}},
 				},
 			},

@@ -44,6 +44,13 @@ spec:
           spec:
             description: MemcachedSpec defines the desired state of Memcached
             properties:
+              cacheSize:
+                default: 64
+                description: CacheSize is the maximum amount of memory to use for
+                  the cache, in megabytes
+                format: int32
+                minimum: 64
+                type: integer
               containerPort:
                 default: 11211
                 description: ContainerPort is the port the memcached container listens

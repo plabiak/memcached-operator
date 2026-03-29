@@ -36,6 +36,12 @@ type MemcachedSpec struct {
 	// +kubebuilder:default=11211
 	// +optional
 	ContainerPort int32 `json:"containerPort,omitempty"`
+
+	// CacheSize is the maximum amount of memory to use for the cache, in megabytes
+	// +kubebuilder:validation:Minimum=64
+	// +kubebuilder:default=64
+	// +optional
+	CacheSize int32 `json:"cacheSize,omitempty"`
 }
 
 type MemcachedStatus struct {
