@@ -6,4 +6,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: memcached-sample
 spec:
-  # TODO(user): Add fields here
+  size: 3
+  containerPort: 11211
+  image: memcached:1.6.9
+

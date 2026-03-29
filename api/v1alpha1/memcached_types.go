@@ -20,60 +20,47 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
-
 // MemcachedSpec defines the desired state of Memcached
 type MemcachedSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	// The following markers will use OpenAPI v3 schema to validate the value
-	// More info: https://book.kubebuilder.io/reference/markers/crd-validation.html
+	// Size is the size of the memcached deployment
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Required
+	Size int32 `json:"size"`
 
-	// foo is an example field of Memcached. Edit memcached_types.go to remove/update
+	// Image is the memcached container image
+	// +kubebuilder:default="memcached:1.6.9-alpine"
 	// +optional
-	Foo *string `json:"foo,omitempty"`
+	Image string `json:"image,omitempty"`
+
+	// ContainerPort is the port the memcached container listens on
+	// +kubebuilder:default=11211
+	// +optional
+	ContainerPort int32 `json:"containerPort,omitempty"`
 }
 
-// MemcachedStatus defines the observed state of Memcached.
 type MemcachedStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-
-	// For Kubernetes API conventions, see:
-	// https://github.com/kubernetes/community/blob/master/contributors/devel/sig-architecture/api-conventions.md#typical-status-properties
-
-	// conditions represent the current state of the Memcached resource.
-	// Each condition has a unique type and reflects the status of a specific aspect of the resource.
-	//
-	// Standard condition types include:
-	// - "Available": the resource is fully functional
-	// - "Progressing": the resource is being created or updated
-	// - "Degraded": the resource failed to reach or maintain its desired state
-	//
-	// The status of each condition is one of True, False, or Unknown.
+	// Nodes are the names of the memcached pods
+	// +optional
+	Nodes []string `json:"nodes,omitempty"`
+	// Conditions represent the latest available observations of an object's state
+	// +operator-sdk:csv:customresourcedefinitions.type=status
 	// +listType=map
 	// +listMapKey=type
 	// +optional
-	Conditions []metav1.Condition `json:"conditions,omitempty"`
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,2,rep,name=conditions"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Size",type="integer",JSONPath=".spec.size",description="The number of memcached pods"
+// +kubebuilder:printcolumne:name="Nodes",type="string",JSONPath=".status.nodes",description="The current memcached nodes"
 
 // Memcached is the Schema for the memcacheds API
 type Memcached struct {
-	metav1.TypeMeta `json:",inline"`
-
-	// metadata is a standard object metadata
-	// +optional
-	metav1.ObjectMeta `json:"metadata,omitzero"`
-
-	// spec defines the desired state of Memcached
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
 	// +required
-	Spec MemcachedSpec `json:"spec"`
-
-	// status defines the observed state of Memcached
+	Spec MemcachedSpec `json:"spec,omitempty"`
 	// +optional
 	Status MemcachedStatus `json:"status,omitzero"`
 }

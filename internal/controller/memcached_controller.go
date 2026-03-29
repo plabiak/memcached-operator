@@ -18,13 +18,20 @@ package controller
 
 import (
 	"context"
-
-	"k8s.io/apimachinery/pkg/runtime"
-	ctrl "sigs.k8s.io/controller-runtime"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"fmt"
+	"reflect"
 
 	cachev1alpha1 "github.com/plabiak/memcached-operator/api/v1alpha1"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // MemcachedReconciler reconciles a Memcached object
@@ -36,6 +43,8 @@ type MemcachedReconciler struct {
 // +kubebuilder:rbac:groups=cache.memcached.dev.local,resources=memcacheds,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cache.memcached.dev.local,resources=memcacheds/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cache.memcached.dev.local,resources=memcacheds/finalizers,verbs=update
+// +kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core,resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -47,17 +56,177 @@ type MemcachedReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.23.3/pkg/reconcile
 func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	// Fetch the Memcached instance
+	memcached := &cachev1alpha1.Memcached{}
+	err := r.Get(ctx, req.NamespacedName, memcached)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info(fmt.Sprintf("Memcached resource %s not found. Ignoring since object must be deleted", req.NamespacedName))
+			return ctrl.Result{}, nil
+		}
+		log.Error(err, fmt.Sprintf("Failed to get Memcached resource %s", req.NamespacedName))
+		return ctrl.Result{}, err
+	}
 
+	// Serivce reconciliation
+	svc := &corev1.Service{}
+	err = r.Get(ctx, types.NamespacedName{Name: memcached.Name, Namespace: memcached.Namespace}, svc)
+	if err != nil && apierrors.IsNotFound(err) {
+		svc = r.serviceForMemcached(memcached)
+		log.Info(fmt.Sprintf("Creating a new Service %s for Memcached %s", svc.Name, memcached.Name))
+		if err := r.Create(ctx, svc); err != nil {
+			log.Error(err, fmt.Sprintf("Failed to create new Service %s for Memcached %s", svc.Name, memcached.Name))
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	} else if err != nil {
+		log.Error(err, fmt.Sprintf("Failed to get Service %s for Memcached %s", svc.Name, memcached.Name))
+		return ctrl.Result{}, err
+	}
+
+	// StatefulSet reconciliation
+	sts := &appsv1.StatefulSet{}
+	err = r.Get(ctx, types.NamespacedName{Name: memcached.Name, Namespace: memcached.Namespace}, sts)
+	if err != nil && apierrors.IsNotFound(err) {
+		sts = r.statefulSetForMemcached(memcached)
+		log.Info(fmt.Sprintf("Creating a new StatefulSet %s for Memcached %s", sts.Name, memcached.Name))
+		if err := r.Create(ctx, sts); err != nil {
+			log.Error(err, fmt.Sprintf("Failed to create new StatefulSet %s for Memcached %s", sts.Name, memcached.Name))
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	} else if err != nil {
+		log.Error(err, fmt.Sprintf("Failed to get StatefulSet %s for Memcached %s", sts.Name, memcached.Name))
+		return ctrl.Result{}, err
+	}
+
+	// Size reconciliation
+	size := memcached.Spec.Size
+	if *sts.Spec.Replicas != size {
+		log.Info(fmt.Sprintf("Updating StatefulSet %s replicas from %d to %d", sts.Name, *sts.Spec.Replicas, size))
+		sts.Spec.Replicas = &size
+		if err := r.Update(ctx, sts); err != nil {
+			log.Error(err, fmt.Sprintf("Failed to update StatefulSet %s replicas for Memcached %s", sts.Name, memcached.Name))
+			return ctrl.Result{}, err
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	//Pod list reconciliation
+	podlist := &corev1.PodList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(memcached.Namespace),
+		client.MatchingLabels(r.labelsForMemcached(memcached.Name)),
+	}
+	if err := r.List(ctx, podlist, listOpts...); err != nil {
+		log.Error(err, fmt.Sprintf("Failed to list pods for Memcached %s", memcached.Name))
+		return ctrl.Result{}, err
+	}
+	podNames := getPodNames(podlist.Items)
+	if !reflect.DeepEqual(podNames, memcached.Status.Nodes) {
+		memcached.Status.Nodes = podNames
+		if err := r.Status().Update(ctx, memcached); err != nil {
+			log.Error(err, fmt.Sprintf("Failed to update Memcached status for %s", memcached.Name))
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Update the Memcached status with the pod names
+	if !reflect.DeepEqual(podNames, memcached.Status.Nodes) {
+		memcached.Status.Nodes = podNames
+		if err := r.Status().Update(ctx, memcached); err != nil {
+			log.Error(err, fmt.Sprintf("Failed to update Memcached status for %s", memcached.Name))
+			return ctrl.Result{}, err
+		}
+	}
+	log.Info(fmt.Sprintf("Reconciling Memcached resource %s", req.NamespacedName))
 	return ctrl.Result{}, nil
+}
+
+// Function helpers generated services
+func (r *MemcachedReconciler) serviceForMemcached(m *cachev1alpha1.Memcached) *corev1.Service {
+	ls := r.labelsForMemcached(m.Name)
+	svc := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      m.Name,
+			Namespace: m.Namespace,
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "None",
+			Selector:  ls,
+			Ports: []corev1.ServicePort{{
+				Port: m.Spec.ContainerPort,
+				Name: "memcached",
+			}},
+		},
+	}
+	_ = controllerutil.SetControllerReference(m, svc, r.Scheme)
+	return svc
+}
+
+// Function helpers generated statefulsets
+func (r *MemcachedReconciler) statefulSetForMemcached(m *cachev1alpha1.Memcached) *appsv1.StatefulSet {
+	ls := r.labelsForMemcached(m.Name)
+	replicas := m.Spec.Size
+
+	image := "memcached:1.6.9-alpine"
+	if m.Spec.Image != "" {
+		image = m.Spec.Image
+	}
+
+	sts := &appsv1.StatefulSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      m.Name,
+			Namespace: m.Namespace,
+		},
+		Spec: appsv1.StatefulSetSpec{
+			Replicas:    &replicas,
+			ServiceName: m.Name,
+			Selector: &metav1.LabelSelector{
+				MatchLabels: ls,
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: ls,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name:  "memcached",
+						Image: image,
+						Ports: []corev1.ContainerPort{{
+							ContainerPort: m.Spec.ContainerPort,
+							Name:          "memcached",
+						}},
+					}},
+				},
+			},
+		},
+	}
+	_ = controllerutil.SetControllerReference(m, sts, r.Scheme)
+	return sts
+}
+
+// Function helpers generated labels
+func (r *MemcachedReconciler) labelsForMemcached(name string) map[string]string {
+	return map[string]string{"app": "memcached", "memcached_cr": name}
+}
+
+// Function helpers generated pod names
+func getPodNames(pods []corev1.Pod) []string {
+	var podNames []string
+	for _, pod := range pods {
+		podNames = append(podNames, pod.Name)
+	}
+	return podNames
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *MemcachedReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&cachev1alpha1.Memcached{}).
-		Named("memcached").
+		Owns(&appsv1.StatefulSet{}).
+		Owns(&corev1.Service{}).
 		Complete(r)
 }
