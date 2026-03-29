@@ -27,7 +27,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -70,48 +69,18 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	// Serivce reconciliation
-	svc := &corev1.Service{}
-	err = r.Get(ctx, types.NamespacedName{Name: memcached.Name, Namespace: memcached.Namespace}, svc)
-	if err != nil && apierrors.IsNotFound(err) {
-		svc = r.serviceForMemcached(memcached)
-		log.Info(fmt.Sprintf("Creating a new Service %s for Memcached %s", svc.Name, memcached.Name))
-		if err := r.Create(ctx, svc); err != nil {
-			log.Error(err, fmt.Sprintf("Failed to create new Service %s for Memcached %s", svc.Name, memcached.Name))
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
-	} else if err != nil {
-		log.Error(err, fmt.Sprintf("Failed to get Service %s for Memcached %s", svc.Name, memcached.Name))
+	svc := r.serviceForMemcached(memcached)
+	log.Info("Applying Service", "Service.Namespace", svc.Namespace, "Service.Name", svc.Name)
+	if err := r.Patch(ctx, svc, client.Apply, client.ForceOwnership, client.FieldOwner("memcached-controller")); err != nil {
+		log.Error(err, "Failed to apply Service", "Service.Namespace", svc.Namespace, "Service.Name", svc.Name)
 		return ctrl.Result{}, err
 	}
 
-	// StatefulSet reconciliation
-	sts := &appsv1.StatefulSet{}
-	err = r.Get(ctx, types.NamespacedName{Name: memcached.Name, Namespace: memcached.Namespace}, sts)
-	if err != nil && apierrors.IsNotFound(err) {
-		sts = r.statefulSetForMemcached(memcached)
-		log.Info(fmt.Sprintf("Creating a new StatefulSet %s for Memcached %s", sts.Name, memcached.Name))
-		if err := r.Create(ctx, sts); err != nil {
-			log.Error(err, fmt.Sprintf("Failed to create new StatefulSet %s for Memcached %s", sts.Name, memcached.Name))
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
-	} else if err != nil {
-		log.Error(err, fmt.Sprintf("Failed to get StatefulSet %s for Memcached %s", sts.Name, memcached.Name))
+	sts := r.statefulSetForMemcached(memcached)
+	log.Info("Applying StatefulSet", "StatefulSet.Namespace", sts.Namespace, "StatefulSet.Name", sts.Name)
+	if err := r.Patch(ctx, sts, client.Apply, client.ForceOwnership, client.FieldOwner("memcached-controller")); err != nil {
+		log.Error(err, "Failed to apply StatefulSet", "StatefulSet.Namespace", sts.Namespace, "StatefulSet.Name", sts.Name)
 		return ctrl.Result{}, err
-	}
-
-	// Size reconciliation
-	size := memcached.Spec.Size
-	if *sts.Spec.Replicas != size {
-		log.Info(fmt.Sprintf("Updating StatefulSet %s replicas from %d to %d", sts.Name, *sts.Spec.Replicas, size))
-		sts.Spec.Replicas = &size
-		if err := r.Update(ctx, sts); err != nil {
-			log.Error(err, fmt.Sprintf("Failed to update StatefulSet %s replicas for Memcached %s", sts.Name, memcached.Name))
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
 	}
 
 	//Pod list reconciliation
@@ -149,9 +118,16 @@ func (r *MemcachedReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 func (r *MemcachedReconciler) serviceForMemcached(m *cachev1alpha1.Memcached) *corev1.Service {
 	ls := r.labelsForMemcached(m.Name)
 	svc := &corev1.Service{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Service",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name,
 			Namespace: m.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(m, cachev1alpha1.GroupVersion.WithKind("Memcached")),
+			},
 		},
 		Spec: corev1.ServiceSpec{
 			ClusterIP: "None",
@@ -177,9 +153,16 @@ func (r *MemcachedReconciler) statefulSetForMemcached(m *cachev1alpha1.Memcached
 	}
 
 	sts := &appsv1.StatefulSet{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "apps/v1",
+			Kind:       "StatefulSet",
+		},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      m.Name,
 			Namespace: m.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(m, cachev1alpha1.GroupVersion.WithKind("Memcached")),
+			},
 		},
 		Spec: appsv1.StatefulSetSpec{
 			Replicas:    &replicas,
@@ -204,7 +187,6 @@ func (r *MemcachedReconciler) statefulSetForMemcached(m *cachev1alpha1.Memcached
 			},
 		},
 	}
-	_ = controllerutil.SetControllerReference(m, sts, r.Scheme)
 	return sts
 }
 

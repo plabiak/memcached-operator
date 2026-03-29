@@ -8,5 +8,5 @@ metadata:
 spec:
   size: 3
   containerPort: 11211
-  image: memcached:1.6.9
+  image: memcached:1.6.8
 
