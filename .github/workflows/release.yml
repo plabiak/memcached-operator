@@ -1,0 +1,50 @@
+name: release (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release-as:
+        type: choice
+        default: auto
+        options: [auto, patch, minor, major]
+
+permissions:
+  contents: write  
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0      
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: git identity
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: install
+        run: npm install --no-save commit-and-tag-version
+
+      - name: bump + changelog + tag
+        run: |
+          if [ "${{ inputs.release-as }}" = "auto" ]; then
+            npx commit-and-tag-version
+          else
+            npx commit-and-tag-version --release-as ${{ inputs.release-as }}
+          fi
+
+      - name: push commit + tag
+        run: git push --follow-tags origin HEAD
+
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=$(git describe --tags --abbrev=0)
+          gh release create "$TAG" --generate-notes
