@@ -34,6 +34,7 @@ jobs:
       - name: Extract release notes
         run: |
           awk '/^## /{c++} c==1' CHANGELOG.md > RELEASE_NOTES.md
+          sed -i -E 's/ \(\[[0-9a-f]{7}\]\([^)]*\)\)//g' RELEASE_NOTES.md
           cat RELEASE_NOTES.md
       - name: Push commit & tag
         run: git push --follow-tags origin HEAD
