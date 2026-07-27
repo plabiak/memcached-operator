@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.2.0](https://github.com/plabiak/memcached-operator/compare/v1.1.2...v1.2.0) (2026-07-27)
+
+
+### Features
+
+* pierwsza funkcja ([4642b63](https://github.com/plabiak/memcached-operator/commit/4642b63949348f347fa855a334fb6f32189f100e))
+
+
+### Bug Fixes
+
+* jakaś poprawka ([b9a5802](https://github.com/plabiak/memcached-operator/commit/b9a580289395b84cf00fe77b20ab7ef2ddd80510))
+
+
+### Maintenance
+
+* imporve release ([9bf7668](https://github.com/plabiak/memcached-operator/commit/9bf766893be477a50dde7fa614c622834a0e80bd))
+* test ([#3](https://github.com/plabiak/memcached-operator/issues/3)) ([827eb5d](https://github.com/plabiak/memcached-operator/commit/827eb5d167721781203e44b45bb908e295486305))
+
 ## [1.1.2](https://github.com/plabiak/memcached-operator/compare/v1.1.1...v1.1.2) (2026-07-27)
 
 ## [1.1.1](https://github.com/plabiak/memcached-operator/compare/v1.1.0...v1.1.1) (2026-07-27)
