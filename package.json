@@ -1,12 +1,13 @@
 {
   "scripts": {
-    "release:dry":   "commit-and-tag-version --dry-run",
-    "release":       "commit-and-tag-version",
+    "release:dry": "commit-and-tag-version --dry-run",
+    "release": "commit-and-tag-version",
     "release:patch": "commit-and-tag-version --release-as patch",
     "release:minor": "commit-and-tag-version --release-as minor",
     "release:major": "commit-and-tag-version --release-as major"
   },
   "devDependencies": {
     "commit-and-tag-version": "^12.5.0"
-  }
+  },
+  "version": "1.1.0"
 }
