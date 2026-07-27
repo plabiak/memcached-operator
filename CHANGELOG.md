@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.1.1](https://github.com/plabiak/memcached-operator/compare/v1.1.0...v1.1.1) (2026-07-27)
+
+
+### Documentation
+
+* uzupełnij test 2 ([#2](https://github.com/plabiak/memcached-operator/issues/2)) ([c4ab323](https://github.com/plabiak/memcached-operator/commit/c4ab323c0b58d2e900519098ad99215e2d2b2692))
+
 ## 1.1.0 (2026-07-27)
 
 
