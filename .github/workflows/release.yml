@@ -6,11 +6,16 @@ on:
         type: choice
         default: auto
         options: [auto, patch, minor, major]
+
 permissions:
   contents: write
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      published: ${{ steps.ver.outputs.published }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -36,11 +41,72 @@ jobs:
           awk '/^## /{c++} c==1' CHANGELOG.md > RELEASE_NOTES.md
           sed -i -E 's/ \(\[[0-9a-f]{7}\]\([^)]*\)\)//g' RELEASE_NOTES.md
           cat RELEASE_NOTES.md
+      - name: Capture tag
+        id: ver
+        run: |
+          TAG=$(git describe --tags --exact-match HEAD 2>/dev/null || true)
+          if [ -z "$TAG" ]; then
+            echo "Brak nowego taga na HEAD - nic nie wydano."
+            echo "published=false" >> $GITHUB_OUTPUT
+          else
+            echo "tag=$TAG"       >> $GITHUB_OUTPUT
+            echo "published=true" >> $GITHUB_OUTPUT
+          fi
       - name: Push commit & tag
+        if: steps.ver.outputs.published == 'true'
         run: git push --follow-tags origin HEAD
       - name: Create GitHub Release
+        if: steps.ver.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "${{ steps.ver.outputs.tag }}" --notes-file RELEASE_NOTES.md
+
+  build:
+    needs: release
+    if: needs.release.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  
+      id-token: write 
+    env:
+      IMAGE_NAME: myapp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}  
+
+      - name: Build image locally (no push)
+        run: |
+          TAG=${{ needs.release.outputs.tag }}
+          VER=${TAG#v}
+          docker build -t $IMAGE_NAME:$VER -t $IMAGE_NAME:sha-${GITHUB_SHA::7} .
+          IMAGE_ID=$(docker inspect --format='{{.Id}}' $IMAGE_NAME:$VER)
+          echo "image_id=$IMAGE_ID" >> $GITHUB_ENV
+          echo "ver=$VER"           >> $GITHUB_ENV
+
+      - name: Generate SBOM (from local image)
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.IMAGE_NAME }}:${{ env.ver }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign SBOM (keyless, sign-blob)
+        run: |
+          cosign sign-blob --yes sbom.spdx.json \
+            --output-signature sbom.spdx.json.sig \
+            --output-certificate sbom.spdx.json.pem
+
+      - name: Attach SBOM + signature to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG=$(git describe --tags --abbrev=0)
-          gh release create "$TAG" --notes-file RELEASE_NOTES.md
+          echo "${{ env.image_id }}" > image-id.txt
+          gh release upload "${{ needs.release.outputs.tag }}" \
+            sbom.spdx.json sbom.spdx.json.sig sbom.spdx.json.pem image-id.txt
+          gh release edit "${{ needs.release.outputs.tag }}" \
+            --notes "$(gh release view "${{ needs.release.outputs.tag }}" --json body -q .body)
+
