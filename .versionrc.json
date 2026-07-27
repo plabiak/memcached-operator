@@ -1,0 +1,14 @@
+{
+  "types": [
+    { "type": "feat",     "section": "Features" },
+    { "type": "fix",      "section": "Bug Fixes" },
+    { "type": "perf",     "section": "Performance" },
+    { "type": "refactor", "section": "Refactor" },
+    { "type": "docs",  "section": "Dokumentacja", "hidden": true },
+    { "type": "test",  "section": "Testy",        "hidden": true },
+    { "type": "chore", "section": "Chore",        "hidden": true },
+    { "type": "ci",    "section": "CI",           "hidden": true }
+  ],
+  "commitUrlFormat":  "https://github.com/OWNER/REPO/commit/{{hash}}",
+  "compareUrlFormat": "https://github.com/OWNER/REPO/compare/{{previousTag}}...{{currentTag}}"
+}
