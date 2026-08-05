@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file. See [commit-and-tag-version](https://github.com/absolute-version/commit-and-tag-version) for commit guidelines.
 
+## [1.3.2](https://github.com/plabiak/memcached-operator/compare/v1.3.1...v1.3.2) (2026-08-05)
+
+
+### Bug Fixes
+
+*  package.json ([7277c1f](https://github.com/plabiak/memcached-operator/commit/7277c1f0caf58ba2b13e32f4c7dea5b8a1ed5b81))
+
+
+### Maintenance
+
+* **deps:** bump minimist in the npm_and_yarn group across 1 directory ([#11](https://github.com/plabiak/memcached-operator/issues/11)) ([9566d40](https://github.com/plabiak/memcached-operator/commit/9566d4073be04547a6c90b615a0aa86edb925316))
+* **deps:** bump the go-minor-patch group across 1 directory with 5 updates ([#10](https://github.com/plabiak/memcached-operator/issues/10)) ([6624694](https://github.com/plabiak/memcached-operator/commit/662469479334a6f0159d4638ebad22f0da9eefc1))
+* update dependabot.yml ([773de08](https://github.com/plabiak/memcached-operator/commit/773de0821669126718bdb2edac3aa313db9d8ca0))
+* Update dependabot.yml for npm ([480e400](https://github.com/plabiak/memcached-operator/commit/480e4008aa5edec9c7a6dc6006e6ab5e7ee8f05b))
+
 ## [1.3.1](https://github.com/plabiak/memcached-operator/compare/v1.3.0...v1.3.1) (2026-07-27)
 
 
